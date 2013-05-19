@@ -1,0 +1,8 @@
+arduino-clibs
+=============
+
+C libraries for Arduino and Atmega 328p
+
+Some libraries are only translation of arduino libraries from C++ to C
+
+From now only core, serial, and softserial are fully working
