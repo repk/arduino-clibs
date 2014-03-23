@@ -1,23 +1,28 @@
-CC= avr-gcc
-OBJCOPY= avr-objcopy
-MAKE= make
+CC = avr-gcc
+OBJCOPY = avr-objcopy
+MAKE = make
 
-ARDUINO_LIBDIR?= ../lib
-CORE= $(ARDUINO_LIBDIR)/core/
+ARDUINO_LIBDIR ?= ../lib/
+CORE = $(ARDUINO_LIBDIR)/core/
+SPI = $(ARDUINO_LIBDIR)/spi/
 
-DEPS= $(CORE)
+ARDUINO_VARIANT ?= standard
+
+DEPS= $(CORE) $(SPI)
 
 CPU= -mmcu=atmega328
-CFLAGS= $(CPU) -DF_CPU=16000000 -W -Wall -Werror -I$(ARDUINO_LIBDIR) -Os
-LDFLAGS= $(CPU) -Wl,--gc-sections -ffunction-sections -fdata-sections \
-	 -static -L$(CORE) -lcore
+CFLAGS= $(CPU) -DF_CPU=16000000 -W -Wall -Werror -I$(ARDUINO_LIBDIR)	\
+	-I$(ARDUINO_LIBDIR)/core/variants/$(ARDUINO_VARIANT) -Os
 
-SRC= hello.c
+LDFLAGS= $(CPU) -Wl,--gc-sections -ffunction-sections -fdata-sections \
+	 -static -L$(SPI) -lspi -L$(CORE) -lcore
+
+SRC= main.c
 OBJ= $(SRC:.c=.o)
 
 
-EXEC= hello.elf
-HEX= hello.hex
+EXEC= echo.elf
+HEX= echo.hex
 
 all: deps $(HEX)
 	@echo
@@ -43,7 +48,6 @@ clean:
 	rm -rf *.o
 
 mrproper: clean
-	rm -rf $(LIB)
 	rm -rf $(EXEC)
 	rm -rf $(HEX)
 

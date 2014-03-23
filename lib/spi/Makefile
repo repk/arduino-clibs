@@ -2,13 +2,16 @@ CC= avr-gcc
 AR= ar
 MAKE= make
 
-ARDUINO_LIBS= /home/repk/Arduino/lib
+ARDUINO_LIBS ?= ..
+ARDUINO_VARIANT ?= standard
 
-CFLAGS= -DF_CPU=16000000 -mmcu=atmega328 -W -Wall -Werror -I$(ARDUINO_LIBS) -Os
+CFLAGS= -DF_CPU=16000000 -mmcu=atmega328 -W -Wall -Werror -I$(ARDUINO_LIBS) \
+	-I$(ARDUINO_LIBS)/core/variants/$(ARDUINO_VARIANT) -Os
+
 LDFLAGS=
 
 LIB= libspi.a
-SRC= spi.c spi_ring_buffer.c
+SRC= spi.c
 OBJ= $(SRC:.c=.o)
 
 

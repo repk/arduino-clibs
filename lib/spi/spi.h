@@ -3,56 +3,101 @@
 
 #include <stdlib.h>
 #include <stdint.h>
-#include "spi_ring_buffer.h"
 
 enum spi_mode {
-	SPI_MASTER,
-	SPI_SLAVE
+	SMODE_MASTER,
+	SMODE_SLAVE
 };
+
 
 enum spi_polarity {
-	SPI_POL_HIGH,
-	SPI_POL_LOW
+	SPOL_HIGH,
+	SPOL_LOW
 };
+
 
 enum spi_phase {
-	SPI_PHA_SETUP,
-	SPI_PHA_SAMPLE
+	SPHA_SETUP,
+	SPHA_SAMPLE,
 };
 
-enum spi_data_order {
-	SPI_MSB_FIRST,
-	SPI_LSB_FIRST
+enum spi_dord {
+	SDORD_MSB_FIRST,
+	SDORD_LSB_FIRST
 };
+
 
 struct spi {
-	struct spi_ring_buffer spi_rb;
-	uint8_t spi_curr_spin;
 #define NO_SPIN UINT8_MAX
+	uint8_t spi_spin; /* Pin connected to slave (SS) */
 	uint8_t spi_flags;
-#define SPI_FLAG_MASTER	0x0001
-#define SPI_FLAG_DORD	0x0010
-#define SPI_FLAG_POL	0x0100
-#define SPI_FLAG_PHA	0x1000
+#define SFLAG_MASTER	1
+#define SFLAG_DORD	2
+#define SFLAG_POL	4
+#define SFLAG_PHA	8
 };
 
-void spi_init(struct spi *s, enum spi_mode const  mode,
-		enum spi_polarity const  pol, enum spi_phase const pha,
-		enum spi_data_order const dorder);
+static inline void spi_setflags(struct spi *s, enum spi_mode mode,
+		enum spi_polarity pol, enum spi_phase pha, enum spi_dord dorder)
+{
+	int fl = 0;
+	if(mode == SMODE_MASTER) {
+		fl |= SFLAG_MASTER;
+	}
+	if(pol == SPOL_LOW) {
+		fl |= SFLAG_POL;
+	}
+	if(pha == SPHA_SAMPLE) {
+		fl |= SFLAG_PHA;
+	}
+	if(dorder == SDORD_LSB_FIRST) {
+		fl |= SFLAG_DORD;
+	}
+	s->spi_flags = fl;
+}
 
-int spi_begin(struct spi *s, unsigned long long const speedhz);
+static inline enum spi_mode spi_getmode(struct spi const *s)
+{
+	if(s->spi_flags & SFLAG_MASTER) {
+		return SMODE_MASTER;
+	}
+	return SMODE_SLAVE;
+}
 
-void spi_wait_txend(void);
+static inline enum spi_polarity spi_getpolarity(struct spi const *s)
+{
+	if(s->spi_flags & SFLAG_POL) {
+		return SPOL_LOW;
+	}
+	return SPOL_HIGH;
+}
 
-int spi_rmslave(uint8_t const pin);
-int spi_addslave(uint8_t const pin);
+static inline enum spi_phase spi_getphase(struct spi const *s)
+{
+	if(s->spi_flags & SFLAG_PHA) {
+		return SPHA_SAMPLE;
+	}
+	return SPHA_SETUP;
+}
 
-int spi_sendchar_async(struct spi *s, char const c, uint8_t const pin);
-int spi_send(struct spi *s, void const *buf, size_t const count,
-		uint8_t const pin);
+static inline enum spi_dord spi_getdata_order(struct spi const *s)
+{
+	if(s->spi_flags & SFLAG_DORD) {
+		return SDORD_LSB_FIRST;
+	}
+	return SDORD_MSB_FIRST;
+}
 
-char spi_sendchar_sync(struct spi *s, char const c, uint8_t const pin);
-size_t spi_send_sync(struct spi *s, void const *src, void *dst,
-		size_t const len, uint8_t const pin);
+void spi_init(struct spi *s, enum spi_mode mode, enum spi_polarity pol,
+		enum spi_phase pha, enum spi_dord dorder);
+
+int spi_begin(struct spi *s, unsigned long long speedhz);
+void spi_end(struct spi *s);
+
+void spi_select_slave(struct spi *s, uint8_t pin);
+void spi_unselect_slave(struct spi *s);
+
+int spi_sendchar_sync(struct spi *s, char const c);
+size_t spi_send_sync(struct spi *s, void const *str, size_t const len);
 
 #endif

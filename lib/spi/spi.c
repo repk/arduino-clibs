@@ -3,304 +3,213 @@
 #include <avr/io.h>
 
 #include <core/arduino.h>
+#include <pins_arduino.h>
 
 #include "spi.h"
 
-static struct spi *spi_current = NULL;
 
-struct _dly_tbl {
-	uint8_t dt_div;
-	uint8_t dt_spr0;
-	uint8_t dt_spr1;
-	uint8_t dt_spi2x;
+struct _clk_tbl {
+	uint8_t ct_div;
+	uint8_t ct_spr0;
+	uint8_t ct_spr1;
+	uint8_t ct_spi2x;
 };
 
-PROGMEM static struct _dly_tbl const _dly_div[] = {
+
+/**
+ * This table lists the different speed configurations
+ */
+PROGMEM static struct _clk_tbl const sck[] = {
 	{1, 0, 0, 1},
 	{2, 0, 0, 0},
-	{3, 0, 1, 1},
-	{4, 0, 1, 0},
-	{5, 1, 0, 1},
-	{6, 1, 0, 0},
+	{3, 1, 0, 1},
+	{4, 1, 0, 0},
+	{5, 0, 1, 1},
+	{6, 0, 1, 0},
 	{7, 1, 1, 1},
 	{8, 1, 1, 0},
 };
 
-static inline void spi_setflags(struct spi *s, enum spi_mode const mode,
-		enum spi_polarity const  pol, enum spi_phase const pha,
-		enum spi_data_order const dorder)
-{
-	int fl = 0;
-	if(mode == SPI_SLAVE) {
-		fl |= SPI_FLAG_MASTER;
-	}
-	if(pol == SPI_POL_LOW) {
-		fl |= SPI_FLAG_POL;
-	}
-	if(pha == SPI_PHA_SAMPLE) {
-		fl |= SPI_FLAG_PHA;
-	}
-	if(dorder == SPI_LSB_FIRST) {
-		fl |= SPI_FLAG_DORD;
-	}
-	s->spi_flags = fl;
-}
 
-static inline enum spi_mode spi_getmode(struct spi const *s)
-{
-	if(s->spi_flags & SPI_FLAG_MASTER) {
-		return SPI_SLAVE;
-	}
-	return SPI_MASTER;
-}
 
-static inline enum spi_polarity spi_getpolarity(struct spi const *s)
+/**
+ * Initialize a spi device
+ */
+void spi_init(struct spi *s, enum spi_mode mode, enum spi_polarity pol,
+		enum spi_phase pha, enum spi_dord dorder)
 {
-	if(s->spi_flags & SPI_FLAG_POL) {
-		return SPI_POL_LOW;
-	}
-	return SPI_POL_HIGH;
-}
+	uint8_t spcr = SPCR;
 
-static inline enum spi_phase spi_getphase(struct spi const *s)
-{
-	if(s->spi_flags & SPI_FLAG_PHA) {
-		return SPI_PHA_SAMPLE;
-	}
-	return SPI_PHA_SETUP;
-}
-
-static inline enum spi_data_order spi_getdata_order(struct spi const *s)
-{
-	if(s->spi_flags & SPI_FLAG_DORD) {
-		return SPI_LSB_FIRST;
-	}
-	return SPI_MSB_FIRST;
-}
-
-void spi_init(struct spi *s, enum spi_mode const  mode,
-		enum spi_polarity const  pol, enum spi_phase const pha,
-		enum spi_data_order const dorder)
-{
-	_SRB_INIT(&s->spi_rb);
-	s->spi_curr_spin = NO_SPIN;
+	s->spi_spin = NO_SPIN;
 	spi_setflags(s, mode, pol, pha, dorder);
+
+	/* SPI mode */
+	if(mode == SMODE_SLAVE) {
+		pinMode(SS, INPUT);
+		spcr &= ~(1 << MSTR);
+	} else {
+		spcr |= (1 << MSTR);
+	}
+
+	/* Polarization and pahse */
+	if(pol == SPOL_HIGH) {
+		spcr &= ~(1 << CPOL);
+	} else {
+		spcr |= CPOL;
+	}
+	if(pha == SPHA_SAMPLE) {
+		spcr &= ~(1 << CPHA);
+	} else {
+		spcr |= (1 << CPHA);
+	}
+
+	/* Data order */
+	if(dorder == SDORD_MSB_FIRST) {
+		spcr &= ~(1 << DORD);
+	} else {
+		spcr |= (1 << DORD);
+	}
+
+	/* Do not intercept interrupts */
+	spcr &= ~(1 << SPIE);
+	/* Enable spi */
+	spcr |= (1 << SPE);
+
+	SPCR = spcr;
+
+	pinMode(SCK, OUTPUT);
+	pinMode(MOSI, OUTPUT);
+
 }
 
 
-int spi_begin(struct spi *s, unsigned long long const speedhz)
+/**
+ * Set SPI speed
+ */
+int spi_begin(struct spi *s, unsigned long long speedhz)
 {
-	size_t i, nb = sizeof(_dly_div)/sizeof(_dly_div[0]);
-	uint8_t f;
+	size_t i, nb = sizeof(sck)/sizeof(sck[0]);
+	uint8_t f, spcr = SPCR, spsr = SPSR;
+	(void) s;
 
 	/* Find appropriate speed configuration variables */
 	for(i = 0; i < nb; ++i) {
-		f = pgm_read_byte(&_dly_div[i].dt_div);
-		if(F_CPU == (speedhz << f)) {
+		f = pgm_read_byte(&sck[i].ct_div);
+		if((F_CPU >> f) == (long long)(speedhz)) {
 			break;
 		}
 	}
+
 	/* Speed cannot be set as it is not handled by hardware */
 	if(i == nb) {
 		return -1;
 	}
 
 	/* Set speed */
-	if(pgm_read_byte(&_dly_div[i].dt_spr0) == 0) {
-		SPCR &= ~(1 << SPR0);
+	if(pgm_read_byte(&sck[i].ct_spr0) == 0) {
+		spcr &= ~(1 << SPR0);
 	} else {
-		SPCR |= (1 << SPR0);
+		spcr |= (1 << SPR0);
 	}
 
-	if(pgm_read_byte(&_dly_div[i].dt_spr1) == 0) {
-		SPCR &= ~(1 << SPR1);
+	if(pgm_read_byte(&sck[i].ct_spr1) == 0) {
+		spcr &= ~(1 << SPR1);
 	} else {
-		SPCR |= (1 << SPR1);
+		spcr |= (1 << SPR1);
 	}
 
-	if(pgm_read_byte(&_dly_div[i].dt_spi2x) == 0) {
-		SPSR &= ~(1 << SPI2X);
+	if(pgm_read_byte(&sck[i].ct_spi2x) == 0) {
+		spsr &= ~(1 << SPI2X);
 	} else {
-		SPSR |= (1 << SPI2X);
+		spsr |= (1 << SPI2X);
 	}
 
-	/* Polarity and Phase */
-	if(spi_getpolarity(s) == SPI_POL_HIGH) {
-		SPCR &= ~(1 << CPOL);
-	} else {
-		SPCR |= CPOL;
-	}
-	if(spi_getphase(s) == SPI_PHA_SAMPLE) {
-		SPCR &= ~(1 << CPHA);
-	} else {
-		SPCR |= (1 << CPHA);
-	}
+	SPSR = spsr;
+	SPCR = spcr;
 
-	/* Data order */
-	if(spi_getdata_order(s) == SPI_LSB_FIRST) {
-		SPCR &= ~(1 << DORD);
-	} else {
-		SPCR |= (1 << DORD);
-	}
-
-	/* SPI mode */
-	if(spi_getmode(s) == SPI_SLAVE) {
-		SPCR &= ~(1 << MSTR);
-	} else {
-		SPCR |= (1 << MSTR);
-	}
-
-	/* Do not intercept interrupts */
-	SPCR &= ~(1 << SPIE);
-	/* Enable spi */
-	SPCR |= (1 << SPE);
-
-/* XXX To Remove */
-	pinMode(9, OUTPUT);
 	return 0;
 }
 
 
-ISR(SPI_STC_vect)
+/**
+ * Ending SPI device
+ */
+void spi_end(struct spi *s)
 {
-	struct spi *s = spi_current;
-	uint8_t c;
-	PORTB |= 1 << 1;
-	if(s == NULL || s->spi_curr_spin == NO_SPIN) {
+	(void) s;
+	SPCR &= ~(1 << SPE);
+	s->spi_spin = NO_SPIN;
+}
+
+
+/**
+ * Select a slave device
+ */
+void spi_select_slave(struct spi *s, uint8_t pin)
+{
+	if(spi_getmode(s) == SMODE_SLAVE)
 		return;
-	}
-	if(_SRB_EMPTY(&s->spi_rb)) {
-		digitalWrite(s->spi_curr_spin, HIGH);
-		/* Do not intercept interrupts */
-		SPCR &= ~(1 << SPIE);
-		s->spi_curr_spin = NO_SPIN;
-		spi_current = NULL;
-	} else {
-		c = srb_pop(&s->spi_rb);
-		SPDR = c;
-	}
-/*XXX to be removed */
-	PORTB &= ~(1 << 1);
+
+	s->spi_spin = pin;
+	digitalWrite(s->spi_spin, HIGH);
+	pinMode(s->spi_spin, OUTPUT);
+
 }
 
-void spi_wait_txend(void)
+/**
+ * Unselect a slave device
+ */
+void spi_unselect_slave(struct spi *s)
 {
-	while(spi_current != NULL);
+	if(spi_getmode(s) == SMODE_SLAVE)
+		return;
+
+	s->spi_spin = NO_SPIN;
 }
 
-int spi_addslave(uint8_t const pin)
+
+static inline char _spi_sendchar_sync(struct spi *s, char const c)
 {
-	/* TODO Check if pin can be a SS pin */
-	pinMode(pin, OUTPUT);
-	digitalWrite(pin, HIGH);
-	return 0;
-}
-
-int spi_rmslave(uint8_t const pin)
-{
-	if(spi_current != NULL && spi_current->spi_curr_spin == pin) {
-		spi_wait_txend();
-	}
-	digitalWrite(pin, LOW);
-	return 0;
-}
-
-int spi_sendchar_async(struct spi *s, char const c, uint8_t const pin)
-{
-	int ret = 0;
-	uint8_t first = 0;
-	uint8_t OLDSREG = SREG;
-	cli();
-
-	if(spi_current == NULL) {
-		spi_current = s;
-		first = 1;
-	} else if(spi_current != s) {
-		SREG = OLDSREG;
-		spi_wait_txend();
-		cli();
-		spi_current = s;
-		first = 1;
-	}
-
-	if(s->spi_curr_spin == NO_SPIN) {
-		s->spi_curr_spin = pin;
-		digitalWrite(pin, LOW);
-		first = 1;
-	} else if(s->spi_curr_spin != pin) {
-		SREG = OLDSREG;
-		spi_wait_txend();
-		cli();
-		s->spi_curr_spin = pin;
-		digitalWrite(pin, LOW);
-		first = 1;
-	}
-
-	if(first) {
-		SPCR |= (1 << SPIE);
-		SPDR = c;
-	} else {
-		ret = srb_push(&s->spi_rb, c);
-	}
-	SREG = OLDSREG;
-	return ret;
-}
-
-int spi_send(struct spi *s, void const *buf, size_t const count,
-		uint8_t const pin)
-{
-	uint8_t const *b = buf;
-	size_t i;
-
-	for(i = 0; i < count; ++i) {
-		if(spi_sendchar_async(s, b[i], pin) != 0) {
-			break;
-		}
-	}
-
-	return i;
-}
-
-static inline char _spi_sendchar_sync(char const c)
-{
+	(void)s;
 	SPDR = c;
-	PORTB |= 1 << 1;
-	while((SPSR & SPIF) == 0);
-	PORTB &= ~(1 << 1);
+	while((SPSR & (1 << SPIF)) == 0);
 	return SPDR;
 }
 
-char spi_sendchar_sync(struct spi *s, char const c, uint8_t const pin)
+
+/**
+ * Send a single char
+ */
+int spi_sendchar_sync(struct spi *s, char const c)
 {
-	char r;
-	spi_wait_txend();
-	if(s->spi_curr_spin != pin) {
-		s->spi_curr_spin = pin;
-		digitalWrite(pin, LOW);
-	}
-	r = _spi_sendchar_sync(c);
-	digitalWrite(pin, HIGH);
-	s->spi_curr_spin = NO_SPIN;
-	return r;
+	if(s->spi_spin == NO_SPIN)
+		return -1;
+
+	digitalWrite(s->spi_spin, LOW);
+	_spi_sendchar_sync(s, c);
+	digitalWrite(s->spi_spin, HIGH);
+
+	return 0;
 }
 
-size_t spi_send_sync(struct spi *s, void const *src, void *dst,
-		size_t const len, uint8_t const pin)
+
+
+/**
+ * Send a whole string
+ */
+size_t spi_send_sync(struct spi *s, void const *str, size_t const len)
 {
-	uint8_t const *b = src;
-	uint8_t *d = dst;
+	uint8_t const *b = str;
 	size_t i;
-	PORTB |= 1 << 1;
-	spi_wait_txend();
-	PORTB &= ~(1 << 1);
-	if(s->spi_curr_spin != pin) {
-		s->spi_curr_spin = pin;
-		digitalWrite(pin, LOW);
-	}
+
+	if(s->spi_spin == NO_SPIN)
+		return -1;
+
+	digitalWrite(s->spi_spin, LOW);
 	for(i = 0; i < len; ++i) {
-		d[i] = _spi_sendchar_sync(b[i]);
+		_spi_sendchar_sync(s, b[i]);
 	}
-	digitalWrite(pin, HIGH);
-	s->spi_curr_spin = NO_SPIN;
+	digitalWrite(s->spi_spin, HIGH);
+
 	return i;
 }
