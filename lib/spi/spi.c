@@ -145,10 +145,16 @@ void spi_end(struct spi *s)
 /**
  * Select a slave device
  */
-void spi_select_slave(struct spi *s, uint8_t pin)
+void spi_slave_select(struct spi *s, uint8_t pin)
 {
 	if(spi_getmode(s) == SMODE_SLAVE)
 		return;
+
+	if(s->spi_spin == pin)
+		return;
+
+	if(s->spi_spin != NO_SPIN)
+		spi_slave_unselect(s);
 
 	s->spi_spin = pin;
 	digitalWrite(s->spi_spin, HIGH);
@@ -159,16 +165,20 @@ void spi_select_slave(struct spi *s, uint8_t pin)
 /**
  * Unselect a slave device
  */
-void spi_unselect_slave(struct spi *s)
+void spi_slave_unselect(struct spi *s)
 {
 	if(spi_getmode(s) == SMODE_SLAVE)
 		return;
 
+	if(s->spi_spin == NO_SPIN)
+		return;
+
+	digitalWrite(s->spi_spin, LOW);
 	s->spi_spin = NO_SPIN;
 }
 
 
-static inline char _spi_sendchar_sync(struct spi *s, char const c)
+static inline char _spi_sendchar_sync(struct spi *s, char c)
 {
 	(void)s;
 	SPDR = c;
@@ -180,7 +190,7 @@ static inline char _spi_sendchar_sync(struct spi *s, char const c)
 /**
  * Send a single char
  */
-int spi_sendchar_sync(struct spi *s, char const c)
+int spi_sendchar_sync(struct spi *s, char c)
 {
 	if(s->spi_spin == NO_SPIN)
 		return -1;
@@ -197,7 +207,7 @@ int spi_sendchar_sync(struct spi *s, char const c)
 /**
  * Send a whole string
  */
-size_t spi_send_sync(struct spi *s, void const *str, size_t const len)
+size_t spi_send_sync(struct spi *s, void const *str, size_t len)
 {
 	uint8_t const *b = str;
 	size_t i;

@@ -94,10 +94,10 @@ void spi_init(struct spi *s, enum spi_mode mode, enum spi_polarity pol,
 int spi_begin(struct spi *s, unsigned long long speedhz);
 void spi_end(struct spi *s);
 
-void spi_select_slave(struct spi *s, uint8_t pin);
-void spi_unselect_slave(struct spi *s);
+void spi_slave_select(struct spi *s, uint8_t pin);
+void spi_slave_unselect(struct spi *s);
 
-int spi_sendchar_sync(struct spi *s, char const c);
-size_t spi_send_sync(struct spi *s, void const *str, size_t const len);
+int spi_sendchar_sync(struct spi *s, char c);
+size_t spi_send_sync(struct spi *s, void const *str, size_t len);
 
 #endif
