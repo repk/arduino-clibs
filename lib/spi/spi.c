@@ -83,6 +83,7 @@ void spi_init(struct spi *s, enum spi_mode mode, enum spi_polarity pol,
 }
 
 
+
 /**
  * Set SPI speed
  */
@@ -145,7 +146,7 @@ void spi_end(struct spi *s)
 /**
  * Select a slave device
  */
-void spi_slave_select(struct spi *s, uint8_t pin)
+void spi_slave_set(struct spi *s, uint8_t pin)
 {
 	if(spi_getmode(s) == SMODE_SLAVE)
 		return;
@@ -154,7 +155,7 @@ void spi_slave_select(struct spi *s, uint8_t pin)
 		return;
 
 	if(s->spi_spin != NO_SPIN)
-		spi_slave_unselect(s);
+		spi_slave_unset(s);
 
 	s->spi_spin = pin;
 	digitalWrite(s->spi_spin, HIGH);
@@ -165,7 +166,7 @@ void spi_slave_select(struct spi *s, uint8_t pin)
 /**
  * Unselect a slave device
  */
-void spi_slave_unselect(struct spi *s)
+void spi_slave_unset(struct spi *s)
 {
 	if(spi_getmode(s) == SMODE_SLAVE)
 		return;
@@ -173,7 +174,7 @@ void spi_slave_unselect(struct spi *s)
 	if(s->spi_spin == NO_SPIN)
 		return;
 
-	digitalWrite(s->spi_spin, LOW);
+	digitalWrite(s->spi_spin, HIGH);
 	s->spi_spin = NO_SPIN;
 }
 
@@ -188,9 +189,84 @@ static inline char _spi_sendchar_sync(struct spi *s, char c)
 
 
 /**
- * Send a single char
+ * Begin communication with the selected slave
  */
-int spi_sendchar_sync(struct spi *s, char c)
+int spi_slave_start(struct spi *s)
+{
+	if(spi_getmode(s) == SMODE_SLAVE)
+		return -1;
+
+	if(s->spi_spin == NO_SPIN)
+		return -1;
+
+	digitalWrite(s->spi_spin, LOW);
+	spi_slave_selected(s);
+
+	return 0;
+}
+
+
+/**
+ * Stop communication with the selected slave
+ */
+int spi_slave_stop(struct spi *s)
+{
+	if(spi_getmode(s) == SMODE_SLAVE)
+		return -1;
+
+	if(s->spi_spin == NO_SPIN)
+		return -1;
+
+	digitalWrite(s->spi_spin, HIGH);
+	spi_slave_unselected(s);
+
+	return 0;
+}
+
+
+/**
+ * Send a single char (spi_slave_start and spi_slave_stop has to be called)
+ *
+ * This function is synchronous (wait till transmission completes)
+ */
+int spi_sendchar(struct spi *s, char c)
+{
+	if(!spi_slave_is_selected(s))
+		return -1;
+
+	_spi_sendchar_sync(s, c);
+	return 0;
+}
+
+
+/**
+ * Send a whole string (spi_slaveL_start() need to be called to select the
+ * proper slave)
+ *
+ * This function is synchronous (wait till transmission completes)
+ */
+size_t spi_send(struct spi *s, void const *str, size_t len)
+{
+	uint8_t const *b = str;
+	size_t i;
+
+	if(!spi_slave_is_selected(s))
+		return -1;
+
+	for(i = 0; i < len; ++i) {
+		_spi_sendchar_sync(s, b[i]);
+	}
+
+	return i;
+}
+
+
+/**
+ * Select slave send a single char and unselect slave
+ *
+ * This function is synchronous (wait till transmission completes)
+ */
+int spi_slave_sendchar(struct spi *s, char c)
 {
 	if(s->spi_spin == NO_SPIN)
 		return -1;
@@ -205,9 +281,11 @@ int spi_sendchar_sync(struct spi *s, char c)
 
 
 /**
- * Send a whole string
+ * Select slave send a whole string then unselect slave
+ *
+ * This function is synchronous (wait till transmission completes)
  */
-size_t spi_send_sync(struct spi *s, void const *str, size_t len)
+size_t spi_slave_send(struct spi *s, void const *str, size_t len)
 {
 	uint8_t const *b = str;
 	size_t i;
